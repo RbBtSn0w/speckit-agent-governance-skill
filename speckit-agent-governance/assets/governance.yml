@@ -1,0 +1,34 @@
+precedence:
+  - constitution
+  - agents
+  - task
+ownership:
+  constitution:
+    - principle
+    - constraint
+    - security
+    - compliance
+    - architecture
+    - compatibility
+    - quality-bar
+    - governance
+  agents:
+    - workflow
+    - communication
+    - tool-usage
+    - planning
+    - editing
+    - validation
+    - handoff
+operationalization:
+  constitution_topics_requiring_agents:
+    - security
+    - compatibility
+    - quality-bar
+    - validation
+  allow_constitution_to_agents_projection: true
+  allow_agents_to_redefine_constitution: false
+runtime:
+  max_constraints: 8
+  max_workflow: 8
+  include_risk_flags: true

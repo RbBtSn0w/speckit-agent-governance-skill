@@ -1,0 +1,4 @@
+interface:
+  display_name: "Speckit Agent Governance"
+  short_description: "Govern AGENTS and constitution boundaries"
+  default_prompt: "Use $speckit-agent-governance to reconcile AGENTS.md and .specify/memory/constitution.md."

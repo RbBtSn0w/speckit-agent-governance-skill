@@ -14,6 +14,12 @@ In complex AI-agent workflows, maintaining clear boundaries between **Principles
 -   **Enforce Precedence**: Constitution > Agents > Task.
 -   **Optimize Runtime Memory**: Generate minimal, high-signal summaries for agent context.
 
+Current behavior is intentionally conservative:
+
+-   If `.specify/memory/constitution.md` is absent, the skill degrades to single-source mode and does not emit constitution-vs-agents governance findings.
+-   Runtime summaries keep constitution constraints and agent workflow separated instead of reclassifying AGENTS rules into both buckets.
+-   Topic detection is heuristic and token-based. It is safer than raw substring matching, but still not a full semantic classifier.
+
 ## Core Architecture
 
 The skill operates on a "professional maintenance layer" philosophy, avoiding the introduction of new long-lived governance documents. It relies on:
@@ -43,6 +49,15 @@ The skill provides several scripts in `speckit-agent-governance/scripts/`:
 ## Configuration
 
 Custom ownership and precedence rules can be configured in `speckit-agent-governance/assets/governance.yml`.
+
+Supported config surface:
+
+-   `precedence`
+-   `ownership`
+-   `operationalization.constitution_topics_requiring_agents`
+-   `runtime.max_constraints`
+-   `runtime.max_workflow`
+-   `runtime.include_risk_flags`
 
 ## License
 

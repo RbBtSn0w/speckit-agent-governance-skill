@@ -400,6 +400,201 @@ class GovernanceScriptCLITests(unittest.TestCase):
             self.assertIn("Secrets MUST NEVER be exposed.", payload["constraints"])
             self.assertIn("Inspect files before editing.", payload["workflow"])
 
+    def test_single_source_mode_does_not_emit_constitution_overreach(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            config = self._write(
+                workspace,
+                "governance.yml",
+                """
+                precedence:
+                  - constitution
+                  - agents
+                  - task
+                ownership:
+                  constitution:
+                    - compatibility
+                    - governance
+                  agents:
+                    - workflow
+                    - communication
+                    - tool-usage
+                    - validation
+                operationalization:
+                  constitution_topics_requiring_agents: []
+                runtime:
+                  max_constraints: 5
+                  max_workflow: 5
+                """,
+            )
+            agents = self._write(
+                workspace,
+                "AGENTS.md",
+                """
+                # AGENTS
+
+                ## Compatibility
+
+                - API changes MUST preserve backward compatibility.
+                """,
+            )
+
+            extracted_completed, extracted_payload = self._run_json(
+                "governance_extract_rules.py",
+                str(agents),
+            )
+            self.assertEqual(extracted_completed.returncode, 0, extracted_completed.stderr)
+
+            extracted_path = self._write(workspace, "extracted.json", json.dumps(extracted_payload, indent=2))
+            classified_completed, classified_payload = self._run_json(
+                "governance_classify_rules.py",
+                "--input",
+                str(extracted_path),
+                "--config",
+                str(config),
+            )
+            self.assertEqual(classified_completed.returncode, 0, classified_completed.stderr)
+
+            classified_path = self._write(workspace, "classified.json", json.dumps(classified_payload, indent=2))
+            completed, payload = self._run_json(
+                "governance_detect_conflicts.py",
+                "--input",
+                str(classified_path),
+                "--config",
+                str(config),
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(payload["mode"], "single-source")
+            self.assertEqual(payload["findings"], [])
+
+    def test_topic_detection_uses_token_boundaries_not_substrings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            constitution = self._write(
+                workspace,
+                ".specify/memory/constitution.md",
+                """
+                # Constitution
+
+                ## Validation
+
+                - Run the full test suite before merging changes.
+                """,
+            )
+
+            completed, payload = self._run_json(
+                "governance_extract_rules.py",
+                str(constitution),
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            rule = next(rule for rule in payload if "full test suite" in rule["text"])
+            self.assertEqual(rule["topic"], "validation")
+
+    def test_runtime_context_does_not_double_count_overreach_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            config = self._write(
+                workspace,
+                "governance.yml",
+                """
+                precedence:
+                  - constitution
+                  - agents
+                  - task
+                ownership:
+                  constitution:
+                    - compatibility
+                    - governance
+                  agents:
+                    - workflow
+                    - communication
+                    - tool-usage
+                    - validation
+                operationalization:
+                  constitution_topics_requiring_agents: []
+                runtime:
+                  max_constraints: 5
+                  max_workflow: 5
+                """,
+            )
+            agents = self._write(
+                workspace,
+                "AGENTS.md",
+                """
+                # AGENTS
+
+                ## Compatibility
+
+                - API changes MUST preserve backward compatibility.
+                """,
+            )
+
+            completed, payload = self._run_json(
+                "governance_build_context.py",
+                "--agents",
+                str(agents),
+                "--config",
+                str(config),
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(payload["mode"], "single-source")
+            self.assertEqual(payload["constraints"], [])
+            self.assertEqual(payload["workflow"], ["API changes MUST preserve backward compatibility."])
+
+    def test_include_risk_flags_false_omits_risk_flags_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            config = self._write(
+                workspace,
+                "governance.yml",
+                """
+                precedence:
+                  - constitution
+                  - agents
+                  - task
+                ownership:
+                  constitution:
+                    - security
+                    - governance
+                  agents:
+                    - workflow
+                    - communication
+                    - tool-usage
+                    - validation
+                operationalization:
+                  constitution_topics_requiring_agents: []
+                runtime:
+                  max_constraints: 5
+                  max_workflow: 5
+                  include_risk_flags: false
+                """,
+            )
+            agents = self._write(
+                workspace,
+                "AGENTS.md",
+                """
+                # AGENTS
+
+                ## Security
+
+                - Secrets MUST NEVER be exposed.
+                """,
+            )
+
+            completed, payload = self._run_json(
+                "governance_build_context.py",
+                "--agents",
+                str(agents),
+                "--config",
+                str(config),
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertNotIn("risk_flags", payload)
+
 
 if __name__ == "__main__":
     unittest.main()

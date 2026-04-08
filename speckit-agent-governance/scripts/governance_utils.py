@@ -41,8 +41,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "quality-bar",
             "validation",
         ],
-        "allow_constitution_to_agents_projection": True,
-        "allow_agents_to_redefine_constitution": False,
     },
     "runtime": {
         "max_constraints": 8,
@@ -63,7 +61,7 @@ TOPIC_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("tool-usage", ("tool", "command", "script", "git", "rg", "browser")),
     ("planning", ("plan", "design", "spec", "proposal")),
     ("editing", ("edit", "modify", "patch", "write file", "minimal diff")),
-    ("validation", ("validate", "verification", "verify", "test", "lint", "build")),
+    ("validation", ("validation", "validate", "verification", "verify", "test", "tests", "lint", "build")),
     ("handoff", ("handoff", "handover", "summary", "next step", "report back")),
 ]
 
@@ -151,6 +149,12 @@ def normalize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def normalize_for_matching(text: str) -> str:
+    lowered = text.lower()
+    lowered = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", " ", lowered)
+    return normalize_whitespace(lowered)
+
+
 def determine_norm_strength(text: str) -> str:
     lowered = text.lower()
     if any(pattern in lowered for pattern in ("must not", "must never", "never", "required", "shall", "must")):
@@ -163,14 +167,16 @@ def determine_norm_strength(text: str) -> str:
 
 
 def detect_topic(heading: str, text: str) -> str:
-    haystack = f"{heading} {text}".lower()
+    haystack = normalize_for_matching(f"{heading} {text}")
+    tokens = set(re.findall(r"[0-9a-z\u4e00-\u9fff]+", haystack))
     scores: dict[str, int] = {}
+    topic_order = {topic: index for index, (topic, _) in enumerate(TOPIC_KEYWORDS)}
     for topic, keywords in TOPIC_KEYWORDS:
-        score = sum(1 for keyword in keywords if keyword in haystack)
+        score = sum(1 for keyword in keywords if keyword_matches(keyword, haystack, tokens))
         if score:
             scores[topic] = score
     if scores:
-        return max(scores.items(), key=lambda item: (item[1], -TOPIC_KEYWORDS.index((item[0], next(keywords for topic, keywords in TOPIC_KEYWORDS if topic == item[0])))))[0]
+        return max(scores.items(), key=lambda item: (item[1], -topic_order[item[0]]))[0]
     return "governance"
 
 
@@ -313,18 +319,26 @@ def classify_rules(rules: list[dict[str, Any]], config: dict[str, Any]) -> list[
 
 
 def normalize_rule_text(text: str) -> str:
-    text = re.sub(r"[^a-z0-9\s]", " ", text.lower())
-    return normalize_whitespace(text)
+    return normalize_for_matching(text)
 
 
 def content_tokens(text: str) -> set[str]:
     tokens = set()
-    for token in re.findall(r"[a-z0-9]+", text.lower()):
+    for token in re.findall(r"[0-9a-z\u4e00-\u9fff]+", normalize_for_matching(text)):
         if token.endswith("s") and len(token) > 4:
             token = token[:-1]
         if token not in STOPWORDS:
             tokens.add(token)
     return tokens
+
+
+def keyword_matches(keyword: str, haystack: str, tokens: set[str]) -> bool:
+    normalized_keyword = normalize_for_matching(keyword)
+    if not normalized_keyword:
+        return False
+    if " " in normalized_keyword:
+        return normalized_keyword in haystack
+    return normalized_keyword in tokens
 
 
 def similarity(a: str, b: str) -> float:
@@ -402,6 +416,13 @@ def detect_findings(classified_rules: list[dict[str, Any]], config: dict[str, An
     constitution_rules, agent_rules = group_by_source(classified_rules)
     mode = "double-source" if constitution_rules else "single-source"
     findings: list[dict[str, Any]] = []
+
+    if mode == "single-source":
+        return {
+            "mode": mode,
+            "findings": findings,
+            "counts": {},
+        }
 
     for rule in classified_rules:
         if rule["source"] in {"constitution", "agents"} and rule["owner"] != rule["source"]:
@@ -555,27 +576,24 @@ def build_runtime_context(classified_rules: list[dict[str, Any]], config: dict[s
     runtime = config["runtime"]
     max_constraints = int(runtime.get("max_constraints", 8))
     max_workflow = int(runtime.get("max_workflow", 8))
-    constitution_topics = set(config["ownership"]["constitution"])
-    agent_topics = set(config["ownership"]["agents"])
+    include_risk_flags = bool(runtime.get("include_risk_flags", True))
 
-    constraints = [
-        rule
-        for rule in classified_rules
-        if rule["source"] == "constitution" or rule["owner"] == "constitution" or rule["topic"] in constitution_topics
-    ]
-    workflow = [
-        rule
-        for rule in classified_rules
-        if rule["source"] == "agents"
-        and (rule["owner"] == "agents" or rule["topic"] in agent_topics or rule["actionability"])
-    ]
+    constraints = [rule for rule in classified_rules if rule["source"] == "constitution"]
+    if mode == "single-source":
+        workflow = [rule for rule in classified_rules if rule["source"] == "agents"]
+    else:
+        workflow = [
+            rule
+            for rule in classified_rules
+            if rule["source"] == "agents" and rule["owner"] == "agents"
+        ]
 
-    risk_flags = [finding["kind"] for finding in findings["findings"]]
-
-    return {
+    context = {
         "mode": mode,
         "precedence": config["precedence"],
         "constraints": unique_texts(constraints, max_constraints),
         "workflow": unique_texts(workflow, max_workflow),
-        "risk_flags": risk_flags,
     }
+    if include_risk_flags:
+        context["risk_flags"] = [finding["kind"] for finding in findings["findings"]]
+    return context

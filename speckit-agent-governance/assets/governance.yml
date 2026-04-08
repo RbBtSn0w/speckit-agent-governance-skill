@@ -26,8 +26,6 @@ operationalization:
     - compatibility
     - quality-bar
     - validation
-  allow_constitution_to_agents_projection: true
-  allow_agents_to_redefine_constitution: false
 runtime:
   max_constraints: 8
   max_workflow: 8
